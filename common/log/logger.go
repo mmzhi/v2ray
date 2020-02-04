@@ -1,6 +1,7 @@
 package log
 
 import (
+	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	"io"
 	"log"
 	"os"
@@ -97,7 +98,7 @@ func (w *consoleLogWriter) Close() error {
 }
 
 type fileLogWriter struct {
-	file   *os.File
+	writer   *rotatelogs.RotateLogs
 	logger *log.Logger
 }
 
@@ -107,7 +108,7 @@ func (w *fileLogWriter) Write(s string) error {
 }
 
 func (w *fileLogWriter) Close() error {
-	return w.file.Close()
+	return w.writer.Close()
 }
 
 // CreateStdoutLogWriter returns a LogWriterCreator that creates LogWriter for stdout.
@@ -121,19 +122,32 @@ func CreateStdoutLogWriter() WriterCreator {
 
 // CreateFileLogWriter returns a LogWriterCreator that creates LogWriter for the given file.
 func CreateFileLogWriter(path string) (WriterCreator, error) {
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	writer, err := rotatelogs.New(
+		path + ".%Y%m%d",
+		rotatelogs.WithMaxAge(time.Hour * 24 * 30),             	// 文件最大保存时间
+		rotatelogs.WithRotationTime(time.Hour * 24), 				// 日志切割时间间隔
+		rotatelogs.WithClock(rotatelogs.Local),
+	)
 	if err != nil {
 		return nil, err
 	}
-	file.Close()
+	writer.Close()
 	return func() Writer {
-		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+
+		writer, err := rotatelogs.New(
+			path + ".%Y%m%d",
+			rotatelogs.WithMaxAge(time.Hour * 24 * 30),             	// 文件最大保存时间
+			rotatelogs.WithRotationTime(time.Hour * 24), 				// 日志切割时间间隔
+			rotatelogs.WithClock(rotatelogs.Local),
+		)
+
 		if err != nil {
 			return nil
 		}
+
 		return &fileLogWriter{
-			file:   file,
-			logger: log.New(file, "", log.Ldate|log.Ltime),
+			writer:   writer,
+			logger: log.New(writer, "", log.Ldate|log.Ltime),
 		}
 	}, nil
 }
