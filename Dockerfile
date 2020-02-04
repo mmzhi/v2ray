@@ -7,7 +7,6 @@ COPY . $GOPATH/src/v2ray.com/core
 
 ENV CGO_ENABLED=0 
 ENV GOOS=linux
-ENV GOPROXY=https://mirrors.aliyun.com/goproxy/
 
 RUN go get && \
     go build -a -o /v2ray -ldflags '-s -w -extldflags "-static"' ./main && \
