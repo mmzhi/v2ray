@@ -8,6 +8,8 @@ require (
 	github.com/golang/protobuf v1.4.3
 	github.com/google/go-cmp v0.5.2
 	github.com/gorilla/websocket v1.4.2
+	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
+	github.com/lestrrat-go/strftime v1.0.3 // indirect
 	github.com/lucas-clemente/quic-go v0.18.1
 	github.com/miekg/dns v1.1.34
 	github.com/pires/go-proxyproto v0.2.0
