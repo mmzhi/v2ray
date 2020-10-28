@@ -5,11 +5,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/golang/protobuf/proto"
+
 	"v2ray.com/core/app/router"
 	"v2ray.com/core/common/net"
 	"v2ray.com/core/common/platform/filesystem"
-
-	"github.com/golang/protobuf/proto"
 )
 
 type RouterRulesConfig struct {
@@ -67,10 +67,15 @@ func (c *RouterConfig) Build() (*router.Config, error) {
 	config := new(router.Config)
 	config.DomainStrategy = c.getDomainStrategy()
 
-	rawRuleList := c.RuleList
-	if c.Settings != nil {
-		rawRuleList = append(c.RuleList, c.Settings.RuleList...)
+	var rawRuleList []json.RawMessage
+	if c != nil {
+		rawRuleList = c.RuleList
+		if c.Settings != nil {
+			c.RuleList = append(c.RuleList, c.Settings.RuleList...)
+			rawRuleList = c.RuleList
+		}
 	}
+
 	for _, rawRule := range rawRuleList {
 		rule, err := ParseRule(rawRule)
 		if err != nil {
@@ -162,7 +167,7 @@ func loadIP(filename, country string) ([]*router.CIDR, error) {
 		}
 	}
 
-	return nil, newError("country not found: " + country)
+	return nil, newError("country not found in ", filename, ": ", country)
 }
 
 func loadSite(filename, country string) ([]*router.Domain, error) {
@@ -181,7 +186,7 @@ func loadSite(filename, country string) ([]*router.Domain, error) {
 		}
 	}
 
-	return nil, newError("country not found: " + country)
+	return nil, newError("list not found in ", filename, ": ", country)
 }
 
 type AttributeMatcher interface {
@@ -260,9 +265,19 @@ func parseDomainRule(domain string) ([]*router.Domain, error) {
 		}
 		return domains, nil
 	}
-
-	if strings.HasPrefix(domain, "ext:") {
-		kv := strings.Split(domain[4:], ":")
+	var isExtDatFile = 0
+	{
+		const prefix = "ext:"
+		if strings.HasPrefix(domain, prefix) {
+			isExtDatFile = len(prefix)
+		}
+		const prefixQualified = "ext-domain:"
+		if strings.HasPrefix(domain, prefixQualified) {
+			isExtDatFile = len(prefixQualified)
+		}
+	}
+	if isExtDatFile != 0 {
+		kv := strings.Split(domain[isExtDatFile:], ":")
 		if len(kv) != 2 {
 			return nil, newError("invalid external resource: ", domain)
 		}
@@ -280,15 +295,30 @@ func parseDomainRule(domain string) ([]*router.Domain, error) {
 	case strings.HasPrefix(domain, "regexp:"):
 		domainRule.Type = router.Domain_Regex
 		domainRule.Value = domain[7:]
+
 	case strings.HasPrefix(domain, "domain:"):
 		domainRule.Type = router.Domain_Domain
 		domainRule.Value = domain[7:]
+
 	case strings.HasPrefix(domain, "full:"):
 		domainRule.Type = router.Domain_Full
 		domainRule.Value = domain[5:]
+
 	case strings.HasPrefix(domain, "keyword:"):
 		domainRule.Type = router.Domain_Plain
 		domainRule.Value = domain[8:]
+
+	case strings.HasPrefix(domain, "dotless:"):
+		domainRule.Type = router.Domain_Regex
+		switch substr := domain[8:]; {
+		case substr == "":
+			domainRule.Value = "^[^.]*$"
+		case !strings.Contains(substr, "."):
+			domainRule.Value = "^[^.]*" + substr + "[^.]*$"
+		default:
+			return nil, newError("substr in dotless rule should not contain a dot: ", substr)
+		}
+
 	default:
 		domainRule.Type = router.Domain_Plain
 		domainRule.Value = domain
@@ -314,9 +344,19 @@ func toCidrList(ips StringList) ([]*router.GeoIP, error) {
 			})
 			continue
 		}
-
-		if strings.HasPrefix(ip, "ext:") {
-			kv := strings.Split(ip[4:], ":")
+		var isExtDatFile = 0
+		{
+			const prefix = "ext:"
+			if strings.HasPrefix(ip, prefix) {
+				isExtDatFile = len(prefix)
+			}
+			const prefixQualified = "ext-ip:"
+			if strings.HasPrefix(ip, prefixQualified) {
+				isExtDatFile = len(prefixQualified)
+			}
+		}
+		if isExtDatFile != 0 {
+			kv := strings.Split(ip[isExtDatFile:], ":")
 			if len(kv) != 2 {
 				return nil, newError("invalid external resource: ", ip)
 			}
@@ -360,6 +400,7 @@ func parseFieldRule(msg json.RawMessage) (*router.RoutingRule, error) {
 		Port       *PortList    `json:"port"`
 		Network    *NetworkList `json:"network"`
 		SourceIP   *StringList  `json:"source"`
+		SourcePort *PortList    `json:"sourcePort"`
 		User       *StringList  `json:"user"`
 		InboundTag *StringList  `json:"inboundTag"`
 		Protocols  *StringList  `json:"protocol"`
@@ -372,15 +413,16 @@ func parseFieldRule(msg json.RawMessage) (*router.RoutingRule, error) {
 	}
 
 	rule := new(router.RoutingRule)
-	if len(rawFieldRule.OutboundTag) > 0 {
+	switch {
+	case len(rawFieldRule.OutboundTag) > 0:
 		rule.TargetTag = &router.RoutingRule_Tag{
 			Tag: rawFieldRule.OutboundTag,
 		}
-	} else if len(rawFieldRule.BalancerTag) > 0 {
+	case len(rawFieldRule.BalancerTag) > 0:
 		rule.TargetTag = &router.RoutingRule_BalancingTag{
 			BalancingTag: rawFieldRule.BalancerTag,
 		}
-	} else {
+	default:
 		return nil, newError("neither outboundTag nor balancerTag is specified in routing rule")
 	}
 
@@ -416,6 +458,10 @@ func parseFieldRule(msg json.RawMessage) (*router.RoutingRule, error) {
 			return nil, err
 		}
 		rule.SourceGeoip = geoipList
+	}
+
+	if rawFieldRule.SourcePort != nil {
+		rule.SourcePortList = rawFieldRule.SourcePort.Build()
 	}
 
 	if rawFieldRule.User != nil {

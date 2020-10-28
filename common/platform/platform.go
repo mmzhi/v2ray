@@ -49,7 +49,7 @@ func (f EnvFlag) GetValueAsInt(defaultValue int) int {
 }
 
 func NormalizeEnvName(name string) string {
-	return strings.Replace(strings.ToUpper(strings.TrimSpace(name)), ".", "_", -1)
+	return strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(name)), ".", "_")
 }
 
 func getExecutableDir() string {
@@ -64,12 +64,6 @@ func getExecutableSubDir(dir string) func() string {
 	return func() string {
 		return filepath.Join(getExecutableDir(), dir)
 	}
-}
-
-func GetAssetLocation(file string) string {
-	const name = "v2ray.location.asset"
-	assetPath := NewEnvFlag(name).GetValue(getExecutableDir)
-	return filepath.Join(assetPath, file)
 }
 
 func GetPluginDirectory() string {

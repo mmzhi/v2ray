@@ -1,43 +1,24 @@
-#指定基础镜像
-FROM golang:1.13 as builder
+############################
+# STEP 1 build executable binary
+############################
+FROM golang:alpine AS builder
 
-#工作目录
-WORKDIR $GOPATH/src/v2ray.com/core
-COPY . $GOPATH/src/v2ray.com/core
+RUN apk update && apk add --no-cache git bash wget curl
+WORKDIR /build
+RUN git clone --progress https://github.com/v2fly/v2ray-core.git . && \
+    bash ./release/user-package.sh nosource noconf codename=$(git describe --abbrev=0 --tags) buildname=docker-fly abpathtgz=/tmp/v2ray.tgz
 
-ENV CGO_ENABLED=0 
-ENV GOOS=linux
+############################
+# STEP 2 build a small image
+############################
+FROM alpine
 
-RUN go get && \
-    go build -a -o /v2ray -ldflags '-s -w -extldflags "-static"' ./main && \
-    go build -a -o /v2ctl -tags confonly -ldflags '-s -w -extldflags "-static"' ./infra/control/main && \
-    wget -qO - https://api.github.com/repos/v2ray/geoip/releases/latest \
-    	| grep browser_download_url | cut -d '"' -f 4 \
-    	| wget -i - -O /geoip.dat && \
-    wget -qO - https://api.github.com/repos/v2ray/domain-list-community/releases/latest \
-    	| grep browser_download_url | cut -d '"' -f 4 \
-    	| wget -i - -O /geosite.dat && \
-    cp release/config/config.json /config.json
+LABEL maintainer "V2Fly Community <admin@v2fly.org>"
+COPY --from=builder /tmp/v2ray.tgz /tmp
+RUN apk update && apk add ca-certificates && \
+    mkdir -p /usr/bin/v2ray && \
+    tar xvfz /tmp/v2ray.tgz -C /usr/bin/v2ray
 
-
-FROM alpine:latest
-
-COPY --from=builder /v2ray /usr/bin/v2ray/
-COPY --from=builder /v2ctl /usr/bin/v2ray/
-COPY --from=builder /geoip.dat /usr/bin/v2ray/
-COPY --from=builder /geosite.dat /usr/bin/v2ray/
-COPY --from=builder /config.json /etc/v2ray/config.json
-
-RUN set -ex && \
-    apk --no-cache add ca-certificates && \
-    apk add tzdata && \
-    ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
-    echo "Asia/Shanghai" > /etc/timezone && \
-    mkdir /var/log/v2ray/ && \
-    chmod +x /usr/bin/v2ray/v2ctl && \
-    chmod +x /usr/bin/v2ray/v2ray
-
+#ENTRYPOINT ["/usr/bin/v2ray/v2ray"]
 ENV PATH /usr/bin/v2ray:$PATH
-
 CMD ["v2ray", "-config=/etc/v2ray/config.json"]
-

@@ -83,7 +83,7 @@ func (p *IncrementalWorkerPicker) findAvailable() int {
 	return -1
 }
 
-func (p *IncrementalWorkerPicker) pickInternal() (*ClientWorker, error, bool) {
+func (p *IncrementalWorkerPicker) pickInternal() (*ClientWorker, bool, error) {
 	p.access.Lock()
 	defer p.access.Unlock()
 
@@ -93,14 +93,14 @@ func (p *IncrementalWorkerPicker) pickInternal() (*ClientWorker, error, bool) {
 		if n > 1 && idx != n-1 {
 			p.workers[n-1], p.workers[idx] = p.workers[idx], p.workers[n-1]
 		}
-		return p.workers[idx], nil, false
+		return p.workers[idx], false, nil
 	}
 
 	p.cleanup()
 
 	worker, err := p.Factory.Create()
 	if err != nil {
-		return nil, err, false
+		return nil, false, err
 	}
 	p.workers = append(p.workers, worker)
 
@@ -111,11 +111,11 @@ func (p *IncrementalWorkerPicker) pickInternal() (*ClientWorker, error, bool) {
 		}
 	}
 
-	return worker, nil, true
+	return worker, true, nil
 }
 
 func (p *IncrementalWorkerPicker) PickAvailable() (*ClientWorker, error) {
-	worker, err, start := p.pickInternal()
+	worker, start, err := p.pickInternal()
 	if start {
 		common.Must(p.cleanupTask.Start())
 	}
@@ -214,8 +214,8 @@ func (m *ClientWorker) monitor() {
 		select {
 		case <-m.done.Wait():
 			m.sessionManager.Close()
-			common.Close(m.link.Writer)     // nolint: errcheck
-			common.Interrupt(m.link.Reader) // nolint: errcheck
+			common.Close(m.link.Writer)
+			common.Interrupt(m.link.Reader)
 			return
 		case <-timer.C:
 			size := m.sessionManager.Size()
@@ -247,8 +247,8 @@ func fetchInput(ctx context.Context, s *Session, output buf.Writer) {
 	}
 	s.transferType = transferType
 	writer := NewWriter(s.ID, dest, output, transferType)
-	defer s.Close()      // nolint: errcheck
-	defer writer.Close() // nolint: errcheck
+	defer s.Close()
+	defer writer.Close()
 
 	newError("dispatching request to ", dest).WriteToLog(session.ExportIDToError(ctx))
 	if err := writeFirstPayload(s.input, writer); err != nil {

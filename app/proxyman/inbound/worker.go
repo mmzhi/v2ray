@@ -43,6 +43,8 @@ type tcpWorker struct {
 	downlinkCounter stats.Counter
 
 	hub internet.Listener
+
+	ctx context.Context
 }
 
 func getTProxyType(s *internet.MemoryStreamConfig) internet.SocketConfig_TProxyMode {
@@ -53,7 +55,7 @@ func getTProxyType(s *internet.MemoryStreamConfig) internet.SocketConfig_TProxyM
 }
 
 func (w *tcpWorker) callback(conn internet.Connection) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(w.ctx)
 	sid := session.NewID()
 	ctx = session.ContextWithID(ctx, sid)
 
@@ -89,9 +91,9 @@ func (w *tcpWorker) callback(conn internet.Connection) {
 	ctx = session.ContextWithContent(ctx, content)
 	if w.uplinkCounter != nil || w.downlinkCounter != nil {
 		conn = &internet.StatCouterConnection{
-			Connection: conn,
-			Uplink:     w.uplinkCounter,
-			Downlink:   w.downlinkCounter,
+			Connection:   conn,
+			ReadCounter:  w.uplinkCounter,
+			WriteCounter: w.downlinkCounter,
 		}
 	}
 	if err := w.proxy.Process(ctx, net.Network_TCP, conn, w.dispatcher); err != nil {
@@ -198,7 +200,7 @@ func (c *udpConn) RemoteAddr() net.Addr {
 }
 
 func (c *udpConn) LocalAddr() net.Addr {
-	return c.remote
+	return c.local
 }
 
 func (*udpConn) SetDeadline(time.Time) error {
@@ -278,7 +280,7 @@ func (w *udpWorker) callback(b *buf.Buffer, source net.Destination, originalDest
 	conn, existing := w.getConnection(id)
 
 	// payload will be discarded in pipe is full.
-	conn.writer.WriteMultiBuffer(buf.MultiBuffer{b}) // nolint: errcheck
+	conn.writer.WriteMultiBuffer(buf.MultiBuffer{b})
 
 	if !existing {
 		common.Must(w.checker.Start())
@@ -301,7 +303,7 @@ func (w *udpWorker) callback(b *buf.Buffer, source net.Destination, originalDest
 			if err := w.proxy.Process(ctx, net.Network_UDP, conn, w.dispatcher); err != nil {
 				newError("connection ends").Base(err).WriteToLog(session.ExportIDToError(ctx))
 			}
-			conn.Close() // nolint: errcheck
+			conn.Close()
 			w.removeConn(id)
 		}()
 	}
@@ -330,9 +332,9 @@ func (w *udpWorker) clean() error {
 	}
 
 	for addr, conn := range w.activeConn {
-		if nowSec-atomic.LoadInt64(&conn.lastActivityTime) > 8 {
+		if nowSec-atomic.LoadInt64(&conn.lastActivityTime) > 8 { // TODO Timeout too small
 			delete(w.activeConn, addr)
-			conn.Close() // nolint: errcheck
+			conn.Close()
 		}
 	}
 

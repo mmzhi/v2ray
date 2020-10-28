@@ -35,7 +35,7 @@ func (s *Server) Type() interface{} {
 	return s.dispatcher.Type()
 }
 
-// Dispatch impliments routing.Dispatcher
+// Dispatch implements routing.Dispatcher
 func (s *Server) Dispatch(ctx context.Context, dest net.Destination) (*transport.Link, error) {
 	if dest.Address != muxCoolAddress {
 		return s.dispatcher.Dispatch(ctx, dest)
@@ -232,7 +232,7 @@ func (w *ServerWorker) run(ctx context.Context) {
 	input := w.link.Reader
 	reader := &buf.BufferedReader{Reader: input}
 
-	defer w.sessionManager.Close() // nolint: errcheck
+	defer w.sessionManager.Close()
 
 	for {
 		select {
